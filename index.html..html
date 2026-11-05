@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Where I’m At</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EAF0F1;--surface:#FFFFFF;--ink:#12232E;--muted:#58696F;--line:#CBD6D9;--accent:#0F7B8A;--mark:#E59E00;--danger:#B3261E;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0F1A21;--surface:#16252E;--ink:#E6EEF1;--muted:#93A6AD;--line:#2A3E49;--accent:#4CC2D1;--mark:#FFC53D;--danger:#FF8A80}}
+:root[data-theme="dark"]{--bg:#0F1A21;--surface:#16252E;--ink:#E6EEF1;--muted:#93A6AD;--line:#2A3E49;--accent:#4CC2D1;--mark:#FFC53D;--danger:#FF8A80}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.45}
+main{max-width:560px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.5rem;font-weight:800;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 18px;font-size:.95rem}
+.coords{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 18px 14px}
+.big{font-size:clamp(1.7rem,8vw,2.4rem);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1.15;word-break:break-word}
+.big span{display:block}
+.status{margin-top:10px;font-size:.92rem;color:var(--muted)}
+.status.on{color:var(--accent);font-weight:600}
+.status.err{color:var(--danger);font-weight:600}
+.view{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+canvas{display:block;width:100%;height:300px}
+.cap{padding:8px 14px 12px;font-size:.85rem;color:var(--muted);border-top:1px solid var(--line)}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+button,.link{font:inherit;font-weight:600;padding:12px 16px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) button.primary{color:#0F1A21}}
+:root[data-theme="dark"] button.primary{color:#0F1A21}
+button.stop{border-color:var(--danger);color:var(--danger)}
+button[disabled],.link[aria-disabled="true"]{opacity:.45;pointer-events:none}
+button:focus-visible,.link:focus-visible{outline:3px solid var(--mark);outline-offset:2px}
+dl{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0}
+dl div{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+dt{font-size:.82rem;color:var(--muted)}
+dd{margin:2px 0 0;font-size:1.2rem;font-weight:600;font-variant-numeric:tabular-nums}
+.note{margin-top:18px;font-size:.88rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>Where I’m At</h1>
+<p class="sub">See your live position and the path you’ve walked. Nothing leaves your phone.</p>
+
+<section class="coords" aria-live="polite">
+  <div class="big"><span id="lat">–</span><span id="lng">–</span></div>
+  <div class="status" id="status">Not sharing yet. Tap Start sharing and allow location access.</div>
+</section>
+
+<div class="btns">
+  <button class="primary" id="start">Start sharing</button>
+  <button class="stop" id="stop" disabled>Stop sharing</button>
+  <button id="copy" disabled>Copy coordinates</button>
+  <a class="link" id="open" href="#" target="_blank" rel="noopener noreferrer" aria-disabled="true">Open in OpenStreetMap</a>
+</div>
+
+<div class="view">
+  <canvas id="cv" aria-label="Your position and walking path"></canvas>
+  <div class="cap" id="cap">Your position is the centre dot. The shaded circle is the GPS accuracy range.</div>
+</div>
+
+<dl style="margin-top:14px">
+  <div><dt>Accuracy</dt><dd id="acc">–</dd></div>
+  <div><dt>Speed</dt><dd id="spd">–</dd></div>
+  <div><dt>Heading</dt><dd id="hdg">–</dd></div>
+  <div><dt>Last update</dt><dd id="upd">–</dd></div>
+</dl>
+
+<p class="note">Version 1 shows your own location only. Sharing with friends comes in Version 2, with invite codes and a stop button for every person.</p>
+</main>
+
+<script>
+(function(){
+var $=function(id){return document.getElementById(id)};
+var watchId=null,trail=[],last=null;
+var cv=$('cv'),ctx=cv.getContext('2d');
+
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function hav(a,b){var R=6371000,t=Math.PI/180,dLa=(b.lat-a.lat)*t,dLo=(b.lng-a.lng)*t;
+ var x=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a.lat*t)*Math.cos(b.lat*t)*Math.sin(dLo/2)*Math.sin(dLo/2);
+ return 2*R*Math.asin(Math.sqrt(x))}
+function compass(d){var n=['N','NE','E','SE','S','SW','W','NW'];return n[Math.round(d/45)%8]}
+function setStatus(t,c){var s=$('status');s.textContent=t;s.className='status'+(c?' '+c:'')}
+
+function setActive(on){
+ $('start').disabled=on;$('stop').disabled=!on;
+}
+
+function onPos(p){
+ var c=p.coords;
+ last={lat:c.latitude,lng:c.longitude,acc:c.accuracy,spd:c.speed,hdg:c.heading,t:p.timestamp};
+ if(!trail.length||hav(trail[trail.length-1],last)>2){trail.push({lat:last.lat,lng:last.lng});if(trail.length>200)trail.shift()}
+ $('lat').textContent=last.lat.toFixed(6)+'° lat';
+ $('lng').textContent=last.lng.toFixed(6)+'° lng';
+ $('acc').textContent='±'+Math.round(last.acc)+' m';
+ $('spd').textContent=last.spd==null||isNaN(last.spd)?'–':(last.spd*2.23694).toFixed(1)+' mph';
+ $('hdg').textContent=last.hdg==null||isNaN(last.hdg)?'–':Math.round(last.hdg)+'° '+compass(last.hdg);
+ $('upd').textContent=new Date(last.t).toLocaleTimeString();
+ setStatus('Sharing live. Tap Stop sharing any time.','on');
+ $('copy').disabled=false;
+ var o=$('open');o.removeAttribute('aria-disabled');
+ o.href='https://www.openstreetmap.org/?mlat='+last.lat+'&mlon='+last.lng+'#map=17/'+last.lat+'/'+last.lng;
+ draw();
+}
+
+function onErr(e){
+ var m={1:'Location access was blocked. Allow location for this page in your browser settings, then try again. If this page is shown inside another app, open it in Safari or Chrome.',
+ 2:'Your device could not find a position. Move to an open area and try again.',
+ 3:'Finding your position took too long. Try again.'};
+ setStatus(m[e.code]||'Something went wrong getting your location.','err');
+ stop(true);
+}
+
+function start(){
+ if(!('geolocation' in navigator)){setStatus('This browser does not support location. Try Safari or Chrome.','err');return}
+ setStatus('Waiting for your position…');
+ setActive(true);
+ try{watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:2000,timeout:20000})}
+ catch(err){setStatus('Could not start location sharing.','err');setActive(false)}
+}
+
+function stop(fromError){
+ if(watchId!==null){navigator.geolocation.clearWatch(watchId);watchId=null}
+ setActive(false);
+ if(!fromError)setStatus('Sharing stopped. Your location is not being tracked.');
+}
+
+function size(){
+ var r=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
+ cv.width=Math.round(w*r);cv.height=Math.round(h*r);ctx.setTransform(r,0,0,r,0,0);
+ return {w:w,h:h}
+}
+
+function draw(){
+ var s=size(),w=s.w,h=s.h,cx=w/2,cy=h/2;
+ ctx.clearRect(0,0,w,h);
+ var line=css('--line'),muted=css('--muted'),accent=css('--accent'),mark=css('--mark');
+ if(!last){ctx.fillStyle=muted;ctx.font='15px "Bricolage Grotesque",system-ui,sans-serif';ctx.textAlign='center';
+  ctx.fillText('Your path will appear here',cx,cy);return}
+ var t=Math.PI/180,kx=111320*Math.cos(last.lat*t),ky=110540;
+ var pts=trail.map(function(p){return {x:(p.lng-last.lng)*kx,y:-(p.lat-last.lat)*ky}});
+ var ext=Math.max(25,last.acc);
+ pts.forEach(function(p){ext=Math.max(ext,Math.abs(p.x),Math.abs(p.y))});
+ ext*=1.25;
+ var R=Math.min(w,h)/2-22,sc=R/ext;
+ var steps=[5,10,25,50,100,250,500,1000,2500,5000,10000,25000],step=steps[steps.length-1];
+ for(var i=0;i<steps.length;i++){if(steps[i]*sc>=45){step=steps[i];break}}
+ ctx.lineWidth=1;ctx.strokeStyle=line;
+ for(var k=1;k*step*sc<=R+1;k++){ctx.beginPath();ctx.arc(cx,cy,k*step*sc,0,7);ctx.stroke()}
+ ctx.beginPath();ctx.moveTo(cx,cy-R);ctx.lineTo(cx,cy+R);ctx.moveTo(cx-R,cy);ctx.lineTo(cx+R,cy);ctx.stroke();
+ ctx.fillStyle=muted;ctx.font='600 12px "Bricolage Grotesque",system-ui,sans-serif';ctx.textAlign='center';
+ ctx.fillText('N',cx,14);
+ ctx.textAlign='left';
+ ctx.fillText((step>=1000?(step/1000)+' km':step+' m')+' per ring',10,h-10);
+ // accuracy circle
+ ctx.beginPath();ctx.arc(cx,cy,Math.max(4,last.acc*sc),0,7);
+ ctx.fillStyle=accent;ctx.globalAlpha=.16;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle=accent;ctx.stroke();
+ // trail
+ if(pts.length>1){ctx.lineWidth=3;ctx.lineJoin='round';ctx.lineCap='round';
+  for(var j=1;j<pts.length;j++){ctx.globalAlpha=.25+.75*(j/pts.length);ctx.strokeStyle=mark;
+   ctx.beginPath();ctx.moveTo(cx+pts[j-1].x*sc,cy+pts[j-1].y*sc);ctx.lineTo(cx+pts[j].x*sc,cy+pts[j].y*sc);ctx.stroke()}
+  ctx.globalAlpha=1}
+ // heading arrow
+ if(last.hdg!=null&&!isNaN(last.hdg)){var a=(last.hdg-90)*t;ctx.strokeStyle=accent;ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+Math.cos(a)*30,cy+Math.sin(a)*30);ctx.stroke()}
+ // you
+ ctx.beginPath();ctx.arc(cx,cy,7,0,7);ctx.fillStyle=accent;ctx.fill();
+ ctx.lineWidth=3;ctx.strokeStyle=css('--surface');ctx.stroke();
+}
+
+function copy(){
+ if(!last)return;
+ var txt=last.lat.toFixed(6)+', '+last.lng.toFixed(6);
+ var done=function(){setStatus('Copied '+txt,'on')};
+ var fail=function(){setStatus('Copy is not available here. Your coordinates are '+txt,'err')};
+ try{navigator.clipboard.writeText(txt).then(done,fail)}catch(e){fail()}
+}
+
+$('start').addEventListener('click',start);
+$('stop').addEventListener('click',function(){stop(false)});
+$('copy').addEventListener('click',copy);
+window.addEventListener('resize',draw);
+try{window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw)}catch(e){}
+draw();
+})();
+</script>
+</body>
+</html>
